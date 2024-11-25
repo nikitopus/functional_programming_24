@@ -1,0 +1,13 @@
+[Unit]
+Description=Backup Daemon
+After=network.target
+
+[Service]
+ExecStart=/home/nik/linux_system_programming/2_laba/backupd
+Restart=always
+User=nik
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
