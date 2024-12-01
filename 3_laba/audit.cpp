@@ -2,6 +2,10 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <sys/syscall.h>
+#include <sys/inotify.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -18,8 +22,9 @@
 #include <iomanip>
 
 using namespace std;
+namespace fs = std::filesystem;
 
-//получает время системы
+// Получение текущего времени
 string current_time() {
     time_t now = time(0);
     tm* time_struct = localtime(&now);
@@ -29,33 +34,60 @@ string current_time() {
     return line_stream.str();
 }
 
+// Проверка размера файла и архивирование
+void check_log_size(const string &log_file) {
+    const size_t MAX_SIZE = 1024 * 1024; // 1 MB
+    if (fs::file_size(log_file) > MAX_SIZE) {
+        string archive_name = log_file + ".bak";
+        fs::rename(log_file, archive_name);
+    }
+}
+
+// Отправка уведомлений по email
+void send_email(const string &message) {
+    FILE *mail = popen("/usr/sbin/sendmail -t", "w");
+    if (mail) {
+        fprintf(mail, "To: nikitopus05@mail.ru\n");
+        fprintf(mail, "Subject: Audit Notification\n\n");
+        fprintf(mail, "%s\n", message.c_str());
+        pclose(mail);
+    }
+}
+
+// Запись системных вызовов
 void write_system(unsigned long long system_code, ofstream &file, int pid) {
-    file << pid << ":";
+    file << pid << ": ";
     file << current_time() << ": ";
     file << system_names[system_code] << " code=" << system_code << endl;
 }
 
+// Запись команды
 void write_command(const char* line, ofstream &file, int pid) {
-    file << pid << ":";
-   file << current_time() << ": ";
-        file << line << endl;
-    }
+    file << pid << ": ";
+    file << current_time() << ": ";
+    file << line << endl;
+}
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
     setlogmask(LOG_UPTO(LOG_NOTICE));
-    if (argc != 2)
-    {
+    if (argc != 2) {
         syslog(LOG_INFO, "wrong arguments");
         return -1;
     }
 
-    int pid = stoi(argv[1]); 
-    ofstream file("logs.log", ios::app);
+    // Ограничение привилегий
+    seteuid(getuid());
+    setegid(getgid());
 
-    write_command("ptrace is afixed", file, pid);
+    int pid = stoi(argv[1]);
+    const string log_file = "logs.log";
+    check_log_size(log_file);
+    ofstream file(log_file, ios::app);
+
+    write_command("ptrace is attached", file, pid);
     ptrace(PTRACE_ATTACH, pid, nullptr, nullptr);
     if (errno == -1) {
+        send_email("Error attaching to process.");
         return errno;
     }
 
@@ -64,6 +96,7 @@ int main(int argc, char** argv)
     if (errno == -1) {
         return errno;
     }
+
     int status;
     waitpid(pid, &status, 0);
     user_regs_struct regs;
@@ -79,7 +112,8 @@ int main(int argc, char** argv)
     }
 
     ptrace(PTRACE_DETACH, pid, nullptr, nullptr);
-    write_command("ptrace listening system calls", file, pid);
+    write_command("ptrace finished listening system calls", file, pid);
 
+    send_email("Audit completed successfully.");
     return 0;
 }
