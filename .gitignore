@@ -1,5 +1,5 @@
 .vscode
-3_laba/example.c
-3_laba/example
+3_laba/example*
 .~lock*
 3_laba/audit
+.venv/
